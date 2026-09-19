@@ -560,13 +560,28 @@ async function initFirebase(){
       await setDoc(docRef, structuredClone(state), { merge:false });
     };
 
+
     onSnapshot(
       docRef,
       snapshot => {
-        if(snapshot.exists()){
-          Object.assign(state, snapshot.data());
+        if (snapshot.exists()) {
+          const remoteData = snapshot.data();
+          
+          // 1. Database se assignments le lo taaki purana schedule na ude
+          state.assignments = remoteData.assignments || {};
+
+          // 2. Roommates aur Areas database ke mat lo, HTML wale hi rakho!
+          // Agar database ka data alag hai, toh HTML ke mutabiq database ko sync/update kar do
+          const needsUpdate = 
+            JSON.stringify(remoteData.people) !== JSON.stringify(state.people) ||
+            JSON.stringify(remoteData.areas) !== JSON.stringify(state.areas);
+
+          if (needsUpdate) {
+            window.saveRemote(); // Database ko turant nayi HTML ke mutabiq overwrite kar dega
+          }
+
           render();
-        }else{
+        } else {
           window.saveRemote();
         }
       },
