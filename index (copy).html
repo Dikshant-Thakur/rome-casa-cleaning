@@ -348,16 +348,6 @@ button:hover{
 .cell.current,.area-label.current{border-color:var(--accent)}
 .day-head.today strong{color:var(--accent)}
 .month-table{display:grid;gap:6px;min-width:640px}
-.daily{display:grid;grid-template-columns:1.5fr 1fr;margin-bottom:18px}
-.daily-photo{margin:0;position:relative;min-height:230px;background:var(--panel2)}
-.daily-photo img{width:100%;height:100%;min-height:230px;max-height:300px;object-fit:cover;display:block}
-.daily-photo figcaption{position:absolute;left:0;right:0;bottom:0;padding:26px 14px 10px;font-size:.78rem;color:#eee;background:linear-gradient(transparent,rgba(0,0,0,.75))}
-.daily-photo figcaption a{color:var(--accent)}
-.daily-quote{padding:24px;display:flex;flex-direction:column;justify-content:center;gap:10px}
-.daily-quote small{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800}
-.daily-quote blockquote{margin:0;font-size:clamp(1.15rem,2vw,1.6rem);line-height:1.3;letter-spacing:-.02em;font-weight:700}
-.daily-quote cite{color:var(--muted)}
-@media(max-width:940px){.daily{grid-template-columns:1fr}}
 .hidden{
   display:none!important;
 }
@@ -416,18 +406,6 @@ button:hover{
     </div>
   </aside>
 </header>
-
-<section class="card daily">
-  <figure class="daily-photo hidden" id="dailyPhoto">
-    <img id="photoImg" alt="Photo of the day" />
-    <figcaption id="photoCaption"></figcaption>
-  </figure>
-  <div class="daily-quote">
-    <small>Quote of the day</small>
-    <blockquote id="quoteText">…</blockquote>
-    <cite id="quoteAuthor"></cite>
-  </div>
-</section>
 
 <section class="grid">
 
@@ -506,18 +484,6 @@ const ANCHOR = Date.UTC(2024,0,1); // Monday
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 let saveTimer;
-
-const FALLBACK_QUOTES = [
-  ["The journey of a thousand miles begins with a single step.","Lao Tzu"],
-  ["It does not matter how slowly you go as long as you do not stop.","Confucius"],
-  ["What stands in the way becomes the way.","Marcus Aurelius"],
-  ["Well done is better than well said.","Benjamin Franklin"],
-  ["Fall seven times, stand up eight.","Japanese proverb"],
-  ["A smooth sea never made a skilled sailor.","English proverb"],
-  ["The best way out is always through.","Robert Frost"],
-  ["Small deeds done are better than great deeds planned.","Peter Marshall"],
-  ["Many hands make light work.","Proverb"]
-];
 let view = "week";
 let cursorDate = startOfDay(new Date());
 
@@ -574,73 +540,7 @@ async function init(){
   };
 
   render();
-  loadDaily(); // not awaited, must not block Firebase
   await initFirebase();
-}
-
-// ---- Daily quote + photo (same for everyone, changes every day) ----
-function dayNumber(){
-  const d = new Date();
-  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
-}
-
-function loadDaily(){
-  loadQuote();
-  loadPhoto();
-}
-
-function showQuote([text, author]){
-  document.querySelector("#quoteText").textContent = `“${text}”`;
-  document.querySelector("#quoteAuthor").textContent = author ? `— ${author}` : "";
-}
-
-async function loadQuote(){
-  const n = dayNumber();
-  showQuote(FALLBACK_QUOTES[n % FALLBACK_QUOTES.length]); // instant, works offline
-  try{
-    const id = (n * 7919) % 1454 + 1; // a different quote id each day
-    const res = await fetch(`https://dummyjson.com/quotes/${id}`);
-    if(res.ok){
-      const q = await res.json();
-      if(q.quote) showQuote([q.quote, q.author]);
-    }
-  }catch(e){ console.warn("Quote fetch failed", e); }
-}
-
-function showPhoto(src, caption, link){
-  const fig = document.querySelector("#dailyPhoto");
-  const img = document.querySelector("#photoImg");
-  const cap = document.querySelector("#photoCaption");
-  img.onload = () => fig.classList.remove("hidden");
-  img.src = src;
-  cap.textContent = caption.length > 170 ? caption.slice(0,167) + "…" : caption;
-  if(link){
-    const a = document.createElement("a");
-    a.href = link; a.target = "_blank"; a.rel = "noopener";
-    a.textContent = " Wikimedia Commons ↗";
-    cap.appendChild(a);
-  }
-}
-
-// Wikipedia's featured "Picture of the Day": a different photo from somewhere in the world every day
-async function loadPhoto(){
-  const now = new Date();
-  for(let back = 0; back < 2; back++){ // fall back to yesterday if today's feed is not out yet
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
-    const path = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
-    try{
-      const res = await fetch(`https://en.wikipedia.org/api/rest_v1/feed/featured/${path}`);
-      if(!res.ok) continue;
-      const data = await res.json();
-      const img = data.image;
-      const src = img && ((img.thumbnail && img.thumbnail.source) || (img.image && img.image.source));
-      if(src){
-        showPhoto(src, (img.description && img.description.text) || img.title || "Photo of the day", img.file_page);
-        return;
-      }
-    }catch(e){ console.warn("Photo fetch failed", e); }
-  }
-  showPhoto(`https://picsum.photos/seed/${dayNumber()}/1200/600`, "Random photo of the day", null);
 }
 
 function setView(nextView){
