@@ -337,8 +337,14 @@ button:hover{
   padding-bottom:8px;
 }
 
-.span-cell{grid-column:2 / -1}
-.assignment.big{font-size:1rem;padding:9px 18px}
+.span-cell{grid-column:2 / -1;gap:16px}
+.cell{flex-wrap:wrap;gap:6px;padding:6px}
+.pill-btn{background:none;border:0;padding:0}
+.pill-btn:hover{background:none}
+.span-cell .assignment{font-size:1rem;padding:9px 18px}
+.done-btn{font-size:.74rem;font-weight:800;padding:6px 10px;border-radius:999px;color:var(--muted)}
+.done-btn.on{background:rgba(56,189,148,.22);border-color:#38bd94;color:#7ee2c1}
+.cell.is-done{border-color:#38bd94;background:rgba(56,189,148,.10)}
 .cell.current,.area-label.current{border-color:var(--accent)}
 .day-head.today strong{color:var(--accent)}
 .month-table{display:grid;gap:6px;min-width:640px}
@@ -385,7 +391,7 @@ button:hover{
 <header class="topbar">
   <div class="title">
     <h1>Cleaning Calendar</h1>
-    <p>Har hafte sabko ek alag task milta hai, cycle mein. Kisi bhi slot par tap karke swap kar sakte ho.</p>
+    <p>Everyone gets a different task each week, rotating in a cycle. Tap any slot to swap it.</p>
   </div>
 
   <aside class="card sync-card">
@@ -468,11 +474,16 @@ const DEFAULT_STATE = {
     { id:"luka", name:"Luka", color:"#e6a100" }
   ],
   areas: FIXED_AREAS,
-  weekAssignments:{}
+  weekAssignments:{},
+  done:{}
 };
 
 const state = structuredClone(DEFAULT_STATE);
 
+const ANCHOR = Date.UTC(2024,0,1); // Monday
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+let saveTimer;
 let view = "week";
 let cursorDate = startOfDay(new Date());
 
@@ -521,7 +532,7 @@ async function init(){
   };
 
   els.resetScheduleBtn.onclick = () => {
-    if(confirm("Manual swaps clear karke clean cycle lagana hai?")){
+    if(confirm("Clear all manual swaps and restore the automatic cycle?")){
       state.weekAssignments = {};
       save();
       renderCalendar();
@@ -559,10 +570,11 @@ async function initFirebase(){
     onSnapshot(
       docRef,
       snapshot => {
-        if (snapshot.metadata.hasPendingWrites) return; // apna hi write, dobara render nahi
+        if (snapshot.metadata.hasPendingWrites) return; // ignore our own local write echo
         if (snapshot.exists()) {
           const remoteData = snapshot.data();
           state.weekAssignments = remoteData.weekAssignments || {};
+          state.done = remoteData.done || {};
           
           if(remoteData.people && remoteData.people.length > 0){
             state.people = remoteData.people;
@@ -661,14 +673,7 @@ function renderWeek(){
     label.textContent = area.name;
     table.appendChild(label);
 
-    const person = getAssignedPerson(area.id, cursorDate);
-    const cell = document.createElement("button");
-    cell.type = "button";
-    cell.className = "cell span-cell" + (isCurrent ? " current" : "");
-    cell.innerHTML = person
-      ? `<div class="assignment big" style="--person-color:${person.color}"><div class="mini-dot"></div>${escapeHtml(person.name)}</div>`
-      : "";
-    cell.onclick = () => cycleAssignment(area.id, cursorDate);
+    const cell = buildSlot(area, cursorDate, "span-cell" + (isCurrent ? " current" : ""));
     table.appendChild(cell);
   });
 
@@ -700,14 +705,7 @@ function renderMonth(){
     grid.appendChild(label);
 
     state.areas.forEach(area => {
-      const person = getAssignedPerson(area.id, ws);
-      const cell = document.createElement("button");
-      cell.type = "button";
-      cell.className = "cell" + (current ? " current" : "");
-      cell.innerHTML = person
-        ? `<div class="assignment" style="--person-color:${person.color}"><div class="mini-dot"></div>${escapeHtml(person.name)}</div>`
-        : "";
-      cell.onclick = () => cycleAssignment(area.id, ws);
+      const cell = buildSlot(area, ws, current ? "current" : "");
       grid.appendChild(cell);
     });
   }
@@ -717,11 +715,8 @@ function renderMonth(){
 }
 
 // ---- Weekly rotation ----
-// Task hafte ke hisaab se assign hota hai (Mon-Sun). Har hafte ek step shift hota hai,
-// isliye 4 log / 4 task mein har bande ko alag task milta hai aur 4 hafte mein poora cycle hota hai.
-const ANCHOR = Date.UTC(2024,0,1); // Monday
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
+// Tasks are assigned per week (Mon-Sun). The assignment shifts by one step every week,
+// so with 4 people and 4 tasks everyone gets a different task and the cycle repeats every 4 weeks.
 function weekIndex(dateObj){
   const s = startOfWeek(dateObj);
   return Math.round((Date.UTC(s.getFullYear(), s.getMonth(), s.getDate()) - ANCHOR) / WEEK_MS);
@@ -748,7 +743,45 @@ function getAssignedPerson(areaId, dateObj){
   return state.people.find(p => p.id === id) || null;
 }
 
-// Tap = agla banda; jiske paas wo banda already tha usse task swap ho jata hai (duplicate nahi banta)
+function isDone(areaId, dateObj){
+  return !!(state.done[dateKey(startOfWeek(dateObj))] || {})[areaId];
+}
+
+function toggleDone(areaId, dateObj){
+  const key = dateKey(startOfWeek(dateObj));
+  const week = state.done[key] || (state.done[key] = {});
+  if(week[areaId]) delete week[areaId]; else week[areaId] = true;
+  if(Object.keys(week).length === 0) delete state.done[key];
+  save();
+  renderCalendar();
+}
+
+// One slot = assigned person (tap to change) + done / not done toggle
+function buildSlot(area, dateObj, extraClass){
+  const person = getAssignedPerson(area.id, dateObj);
+  const done = isDone(area.id, dateObj);
+  const cell = document.createElement("div");
+  cell.className = ("cell " + extraClass + (done ? " is-done" : "")).trim();
+  if(!person) return cell;
+
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "pill-btn";
+  pill.title = "Tap to change person";
+  pill.innerHTML = `<span class="assignment" style="--person-color:${person.color}"><span class="mini-dot"></span>${escapeHtml(person.name)}</span>`;
+  pill.onclick = () => cycleAssignment(area.id, dateObj);
+
+  const tick = document.createElement("button");
+  tick.type = "button";
+  tick.className = "done-btn" + (done ? " on" : "");
+  tick.textContent = done ? "✓ Done" : "Not done";
+  tick.onclick = () => toggleDone(area.id, dateObj);
+
+  cell.append(pill, tick);
+  return cell;
+}
+
+// Tap = next person; the person who already had that slot swaps tasks with you (no duplicates)
 function cycleAssignment(areaId, dateObj){
   const cur = getWeekAssignment(dateObj);
   const idx = state.people.findIndex(p => p.id === cur[areaId]);
@@ -759,11 +792,18 @@ function cycleAssignment(areaId, dateObj){
   if(other) updated[other.id] = cur[areaId];
 
   state.weekAssignments[dateKey(startOfWeek(dateObj))] = updated;
+
+  // A new person on a slot means it is not done yet
+  const doneWeek = state.done[dateKey(startOfWeek(dateObj))];
+  if(doneWeek){
+    delete doneWeek[areaId];
+    if(other) delete doneWeek[other.id];
+    if(Object.keys(doneWeek).length === 0) delete state.done[dateKey(startOfWeek(dateObj))];
+  }
   save();
   renderCalendar();
 }
 
-let saveTimer;
 function save(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
