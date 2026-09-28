@@ -144,14 +144,12 @@ button:hover{
   padding:18px;
 }
 
-.people-list,
-.area-list{
+.people-list{
   display:grid;
   gap:10px;
 }
 
-.person,
-.area-chip{
+.person{
   display:grid;
   grid-template-columns:auto 1fr auto;
   gap:10px;
@@ -169,19 +167,12 @@ button:hover{
   background:var(--person-color);
 }
 
-.person input,
-.area-chip input{
+.person input{
   width:100%;
   background:transparent;
   border:0;
   color:var(--text);
   outline:0;
-}
-
-.delete-btn{
-  width:30px;
-  height:30px;
-  padding:0;
 }
 
 .primary-btn{
@@ -235,7 +226,7 @@ button:hover{
 
 .week-table{
   display:grid;
-  grid-template-columns:116px repeat(7, minmax(80px,1fr));
+  grid-template-columns:140px repeat(7, minmax(85px,1fr));
   gap:6px;
   min-width:760px;
 }
@@ -275,17 +266,22 @@ button:hover{
   display:flex;
   align-items:center;
   justify-content:center;
+  transition:border-color .15s;
+}
+
+.cell:hover{
+  border-color:var(--accent);
 }
 
 .assignment{
   display:flex;
   gap:8px;
   align-items:center;
-  background:rgba(0,0,0,.22);
-  padding:6px 9px;
+  background:rgba(0,0,0,.25);
+  padding:6px 10px;
   border-radius:999px;
   font-size:.78rem;
-  font-weight:900;
+  font-weight:800;
 }
 
 .mini-dot{
@@ -384,7 +380,7 @@ button:hover{
 <header class="topbar">
   <div class="title">
     <h1>Cleaning Calendar</h1>
-    <p>Tap tasks to cycle roommates. Everyone sees updates instantly.</p>
+    <p>Tasks cycle fairly each week across roommates. Tap to customize any slot.</p>
   </div>
 
   <aside class="card sync-card">
@@ -405,21 +401,12 @@ button:hover{
 <aside class="card">
   <div class="card-header">
     <h2>Roommates</h2>
-    <small>Rename people and colors</small>
+    <small>Order here sets the rotation cycle</small>
   </div>
 
   <div class="section">
     <div id="peopleList" class="people-list"></div>
-  </div>
-
-  <div class="card-header">
-    <h2>Cleaning Areas</h2>
-    <small>Add/remove house areas</small>
-  </div>
-
-  <div class="section">
-    <div id="areaList" class="area-list"></div>
-    <button id="addAreaBtn" class="primary-btn" type="button">+ Add Area</button>
+    <button id="resetScheduleBtn" class="primary-btn" type="button" style="margin-top:18px;">↻ Re-sync Auto Cycle</button>
   </div>
 </aside>
 
@@ -460,6 +447,14 @@ const firebaseConfig = {
   measurementId: "G-K38Q24H8RK"
 };
 
+// Fixed areas list
+const FIXED_AREAS = [
+  { id:"kitchen", name:"Kitchen" },
+  { id:"bagno_con_vasca", name:"Bagno con vasca" },
+  { id:"normale_bagno", name:"Bagno Normale" },
+  { id:"common_pavimento", name:"Common Pavimento" }
+];
+
 const DEFAULT_STATE = {
   people:[
     { id:"dikshant", name:"Dikshant", color:"#0f957f" },
@@ -467,12 +462,7 @@ const DEFAULT_STATE = {
     { id:"luciana", name:"Luciana", color:"#5b52d6" },
     { id:"luka", name:"Luka", color:"#e6a100" }
   ],
-  areas:[
-    { id:"kitchen", name:"Kitchen" },
-    { id:"bagno_con_vasca", name:"Bagno con vasca" },
-    { id:"normale_bagno", name:"Bagno Normale" },
-    { id:"common_pavimento", name:"Common Pavimento" }
-  ],
+  areas: FIXED_AREAS,
   assignments:{}
 };
 
@@ -483,14 +473,14 @@ let cursorDate = startOfDay(new Date());
 
 const els = {
   peopleList:document.querySelector("#peopleList"),
-  areaList:document.querySelector("#areaList"),
   weekView:document.querySelector("#weekView"),
   monthView:document.querySelector("#monthView"),
   dateTitle:document.querySelector("#dateTitle"),
   syncText:document.querySelector("#syncText"),
   weekTab:document.querySelector("#weekTab"),
   monthTab:document.querySelector("#monthTab"),
-  shareLink:document.querySelector("#shareLink")
+  shareLink:document.querySelector("#shareLink"),
+  resetScheduleBtn:document.querySelector("#resetScheduleBtn")
 };
 
 init();
@@ -510,7 +500,6 @@ async function init(){
     cursorDate = view === "week"
       ? addDays(cursorDate,-7)
       : addMonths(cursorDate,-1);
-
     renderCalendar();
   };
 
@@ -518,7 +507,6 @@ async function init(){
     cursorDate = view === "week"
       ? addDays(cursorDate,7)
       : addMonths(cursorDate,1);
-
     renderCalendar();
   };
 
@@ -527,7 +515,13 @@ async function init(){
     renderCalendar();
   };
 
-  document.querySelector("#addAreaBtn").onclick = addArea;
+  els.resetScheduleBtn.onclick = () => {
+    if(confirm("Manual edits clear karke clean cycle lagana hai?")){
+      state.assignments = {};
+      save();
+      renderCalendar();
+    }
+  };
 
   render();
   await initFirebase();
@@ -535,13 +529,10 @@ async function init(){
 
 function setView(nextView){
   view = nextView;
-
   els.weekTab.classList.toggle("active", view === "week");
   els.monthTab.classList.toggle("active", view === "month");
-
   els.weekView.classList.toggle("hidden", view !== "week");
   els.monthView.classList.toggle("hidden", view !== "month");
-
   renderCalendar();
 }
 
@@ -560,25 +551,17 @@ async function initFirebase(){
       await setDoc(docRef, structuredClone(state), { merge:false });
     };
 
-
     onSnapshot(
       docRef,
       snapshot => {
         if (snapshot.exists()) {
           const remoteData = snapshot.data();
-          
-          // 1. Database se assignments le lo taaki purana schedule na ude
           state.assignments = remoteData.assignments || {};
-
-          // 2. Roommates aur Areas database ke mat lo, HTML wale hi rakho!
-          // Agar database ka data alag hai, toh HTML ke mutabiq database ko sync/update kar do
-          const needsUpdate = 
-            JSON.stringify(remoteData.people) !== JSON.stringify(state.people) ||
-            JSON.stringify(remoteData.areas) !== JSON.stringify(state.areas);
-
-          if (needsUpdate) {
-            window.saveRemote(); // Database ko turant nayi HTML ke mutabiq overwrite kar dega
+          
+          if(remoteData.people && remoteData.people.length > 0){
+            state.people = remoteData.people;
           }
+          state.areas = FIXED_AREAS;
 
           render();
         } else {
@@ -599,7 +582,6 @@ async function initFirebase(){
 
 function render(){
   renderPeople();
-  renderAreas();
   renderCalendar();
 }
 
@@ -633,42 +615,6 @@ function renderPeople(){
     };
 
     els.peopleList.appendChild(row);
-  });
-}
-
-function renderAreas(){
-  els.areaList.innerHTML = "";
-
-  state.areas.forEach(area => {
-    const row = document.createElement("div");
-    row.className = "area-chip";
-
-    row.innerHTML = `
-      <div style="width:13px;height:13px;border-radius:999px;background:#5f656b"></div>
-      <input value="${escapeHtml(area.name)}" />
-      <button class="delete-btn" type="button">×</button>
-    `;
-
-    const input = row.querySelector("input");
-    const button = row.querySelector("button");
-
-    input.oninput = () => {
-      area.name = input.value.trim() || "New Area";
-      save();
-      renderCalendar();
-    };
-
-    button.onclick = () => {
-      if(!confirm(`Delete "${area.name}"?`)) return;
-
-      state.areas = state.areas.filter(a => a.id !== area.id);
-      Object.values(state.assignments).forEach(day => delete day[area.id]);
-
-      save();
-      render();
-    };
-
-    els.areaList.appendChild(row);
   });
 }
 
@@ -712,9 +658,9 @@ function renderWeek(){
       cell.className = "cell";
       cell.type = "button";
 
-      fillCell(cell, key, area.id);
+      fillCell(cell, key, area.id, day);
 
-      cell.onclick = () => cycleAssignment(key, area.id);
+      cell.onclick = () => cycleAssignment(key, area.id, day);
       table.appendChild(cell);
     });
   });
@@ -755,7 +701,7 @@ function renderMonth(){
     tile.innerHTML = `<div class="day-number">${day.getDate()}</div>`;
 
     state.areas.forEach(area => {
-      const person = getAssignedPerson(key, area.id);
+      const person = getAssignedPerson(key, area.id, day);
 
       const item = document.createElement("button");
       item.type = "button";
@@ -766,7 +712,7 @@ function renderMonth(){
         <span>${escapeHtml(area.name)} · ${person ? escapeHtml(person.name) : "Unassigned"}</span>
       `;
 
-      item.onclick = () => cycleAssignment(key, area.id);
+      item.onclick = () => cycleAssignment(key, area.id, day);
 
       tile.appendChild(item);
     });
@@ -778,8 +724,8 @@ function renderMonth(){
   els.monthView.appendChild(grid);
 }
 
-function fillCell(cell,key,areaId){
-  const person = getAssignedPerson(key,areaId);
+function fillCell(cell, key, areaId, dateObj){
+  const person = getAssignedPerson(key, areaId, dateObj);
 
   if(!person){
     cell.innerHTML = "";
@@ -794,18 +740,51 @@ function fillCell(cell,key,areaId){
   `;
 }
 
-function cycleAssignment(key,areaId){
+// Fair Weekly Rotation Algorithm (Round-Robin)
+// Week number ke basis par index rotate hota hai:
+// Area 0, 1, 2, 3 ko different person milta hai har hafte.
+function getAutoAssignedPerson(dateObj, areaId){
+  if(!state.people || state.people.length === 0) return null;
+  const numPeople = state.people.length;
+
+  const areaIndex = state.areas.findIndex(a => a.id === areaId);
+  if(areaIndex === -1) return null;
+
+  // Epoch week count: Har hafte shift +1 hota hai
+  const weekNumber = Math.floor(startOfWeek(dateObj).getTime() / (7 * 24 * 60 * 60 * 1000));
+
+  // Shifted circular index
+  const personIndex = Math.abs((areaIndex + weekNumber) % numPeople);
+  return state.people[personIndex];
+}
+
+function getAssignedPerson(key, areaId, dateObj){
+  // Pehle manual override check karein
+  if(state.assignments[key] && state.assignments[key][areaId] !== undefined){
+    const manualId = state.assignments[key][areaId];
+    if(manualId === null) return null; // Unassigned explicitly
+    return state.people.find(p => p.id === manualId) || null;
+  }
+
+  // Agar manual nahi hai toh automatic fair rotation follow karein
+  const parsedDate = dateObj || parseDateKey(key);
+  return getAutoAssignedPerson(parsedDate, areaId);
+}
+
+function cycleAssignment(key, areaId, dateObj){
   if(!state.assignments[key]){
     state.assignments[key] = {};
   }
 
-  const currentId = state.assignments[key][areaId];
-  const index = state.people.findIndex(p => p.id === currentId);
-  const next = state.people[index + 1];
+  const currentPerson = getAssignedPerson(key, areaId, dateObj);
+  const currentIndex = state.people.findIndex(p => p.id === currentPerson?.id);
 
-  if(next){
-    state.assignments[key][areaId] = next.id;
-  }else{
+  if(currentIndex === -1){
+    state.assignments[key][areaId] = state.people[0]?.id;
+  } else if(currentIndex < state.people.length - 1){
+    state.assignments[key][areaId] = state.people[currentIndex + 1].id;
+  } else {
+    // End of cycle: unassign / auto-sync
     delete state.assignments[key][areaId];
   }
 
@@ -815,21 +794,6 @@ function cycleAssignment(key,areaId){
 
   save();
   renderCalendar();
-}
-
-function getAssignedPerson(key,areaId){
-  const personId = state.assignments[key]?.[areaId];
-  return state.people.find(p => p.id === personId) || null;
-}
-
-function addArea(){
-  state.areas.push({
-    id:crypto.randomUUID(),
-    name:"New Area"
-  });
-
-  save();
-  render();
 }
 
 async function save(){
@@ -866,6 +830,11 @@ function dateKey(date){
   const m = String(date.getMonth()+1).padStart(2,"0");
   const d = String(date.getDate()).padStart(2,"0");
   return `${y}-${m}-${d}`;
+}
+
+function parseDateKey(str){
+  const parts = str.split("-");
+  return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
 }
 
 function weekdayShort(date){
